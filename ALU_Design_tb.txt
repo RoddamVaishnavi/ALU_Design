@@ -1,0 +1,174 @@
+
+`include "ALU_Design.v"
+`include "ALU_Design_ref.v"
+
+module ALU_Design_tb;
+
+    parameter WIDTH     = 8;
+    parameter CMD_WIDTH = 4;
+
+    reg  [WIDTH-1:0]     OPA, OPB;
+    reg                  CIN, CLK, RST, CE, MODE;
+    reg  [1:0]           INP_VALID;
+    reg  [CMD_WIDTH-1:0] CMD;
+
+    wire                 COUT_d, OVERFLOW_d, ERR_d, G_d, L_d, E_d;
+    wire [WIDTH:0]       RESULT_d;
+    wire [2*WIDTH:0]     MUL_RES_d;
+
+    wire                 COUT_r, OVERFLOW_r, ERR_r, G_r, L_r, E_r;
+    wire [WIDTH:0]       RESULT_r;
+    wire [2*WIDTH:0]     MUL_RES_r;
+
+    integer passed = 0, failed = 0, total = 0;
+      integer file_Id;
+    ALU_Design #(
+        .WIDTH    (WIDTH),
+        .CMD_WIDTH(CMD_WIDTH)
+    ) dut (
+        .OPA       (OPA),
+        .OPB       (OPB),
+        .CIN       (CIN),
+        .CLK       (CLK),
+        .RST       (RST),
+        .CE        (CE),
+        .MODE      (MODE),
+        .INP_VALID (INP_VALID),
+        .CMD       (CMD),
+        .COUT      (COUT_d),
+        .OVERFLOW  (OVERFLOW_d),
+        .ERR       (ERR_d),
+        .G         (G_d),
+        .L         (L_d),
+        .E         (E_d),
+        .RESULT    (RESULT_d),
+        .MUL_RES   (MUL_RES_d)
+    );
+
+    ALU_Design_ref #(
+        .WIDTH    (WIDTH),
+        .CMD_WIDTH(CMD_WIDTH)
+    ) ref_model (
+        .OPA       (OPA),
+        .OPB       (OPB),
+        .CIN       (CIN),
+        .CLK       (CLK),
+        .RST       (RST),
+        .CE        (CE),
+        .MODE      (MODE),
+        .INP_VALID (INP_VALID),
+        .CMD       (CMD),
+        .COUT      (COUT_r),
+        .OVERFLOW  (OVERFLOW_r),
+        .ERR       (ERR_r),
+        .G         (G_r),
+        .L         (L_r),
+        .E         (E_r),
+        .RESULT    (RESULT_r),
+        .MUL_RES   (MUL_RES_r)
+    );
+
+    initial begin
+        CLK = 0;
+        forever #5 CLK = ~CLK;
+    end
+
+    task check_output;
+        begin
+            #20;
+            total = total + 1;
+            $fdisplay(file_Id,">> TEST %0d RESULTS:", total);
+            $fdisplay(file_Id,"   DUT: RESULT = %0d    MUL_RES = %0d    COUT = %b    OVERFLOW = %b    ERR = %b    G = %b    L = %b    E = %b",
+                     RESULT_d, MUL_RES_d, COUT_d, OVERFLOW_d, ERR_d, G_d, L_d, E_d);
+            $fdisplay(file_Id,"   REF: RESULT = %0d    MUL_RES = %0d    COUT = %b    OVERFLOW = %b    ERR = %b    G = %b    L = %b    E = %b",
+                     RESULT_r, MUL_RES_r, COUT_r, OVERFLOW_r, ERR_r, G_r, L_r, E_r);
+            if ((CMD == 4'b1010) || (CMD == 4'b1011)) begin
+                if (MUL_RES_d !== MUL_RES_r) begin
+                    $display("   → FAIL #%0d: MUL_RES mismatch!  DUT = %0d    REF = %0d", total, MUL_RES_d, MUL_RES_r);
+                    failed = failed + 1;
+                    disable check_output;
+                end
+            end else begin
+                if (RESULT_d !== RESULT_r) begin
+                    $display("   → FAIL #%0d: RESULT mismatch!   DUT = %0d    REF = %0d", total, RESULT_d, RESULT_r);
+                    failed = failed + 1;
+                    disable check_output;
+                end
+            end
+            if ((COUT_d     !== COUT_r)     ||
+                (OVERFLOW_d !== OVERFLOW_r) ||
+                (ERR_d      !== ERR_r)      ||
+                (G_d        !== G_r)        ||
+                (L_d        !== L_r)        ||
+                (E_d        !== E_r)) begin
+                $display("   → FAIL #%0d: Flag mismatch!", total);
+                $display("       DUT: COUT=%b  OVF=%b  ERR=%b  G=%b  L=%b  E=%b",
+                         COUT_d, OVERFLOW_d, ERR_d, G_d, L_d, E_d);
+                $display("       REF: COUT=%b  OVF=%b  ERR=%b  G=%b  L=%b  E=%b",
+                         COUT_r, OVERFLOW_r, ERR_r, G_r, L_r, E_r);
+                failed = failed + 1;
+            end else begin
+                $display("   → PASS #%0d", total);
+                passed = passed + 1;
+            end
+            $display("----------------------------------------------------------------");
+        end
+    endtask
+
+     task generate_random_vector;
+        begin
+            OPA  = $random;
+            OPB  = $random;
+            CIN  = $random % 2;
+            MODE = $random % 2;
+            CMD  = $urandom_range(0, 15);
+            if (CMD <= 4) begin
+                case ($urandom_range(0, 2))
+                    0: INP_VALID = 2'b11;
+                    1: INP_VALID = 2'b01;
+                    2: INP_VALID = 2'b10;
+                    default: INP_VALID = 2'b00;
+                endcase
+            end else begin
+                INP_VALID = 2'b11;
+            end
+            CE = 1;
+            check_output();
+        end
+    endtask
+
+    integer i;
+    initial begin
+        OPA       = 0;
+        OPB       = 0;
+        CIN       = 0;
+        MODE      = 0;
+        CMD       = 0;
+        INP_VALID = 2'b00;
+        CE        = 0;
+        RST       = 1;
+        #12;
+        RST = 0;
+        file_Id = $fopen("alu_output.txt","w");
+        for (i = 0; i < 200; i = i + 1) begin
+            fork
+                generate_random_vector();
+            $fdisplay(file_Id,"TEST %0d INPUTS: CMD = %b    MODE = %b    INP_VALID = %b    OPA = %0d    OPB = %0d    CIN = %b    CE = %b",
+                     i+1, CMD, MODE, INP_VALID, OPA, OPB, CIN, CE);
+            @(posedge CLK);
+            //INP_VALID = 2'b00;
+            //@(posedge CLK);
+            //@(posedge CLK);
+            check_output();
+            join
+        end
+        $display("\n========== TEST SUMMARY ==========");
+        $display(" Total tests  = %0d", total);
+        $display(" Passed tests = %0d", passed);
+        $display(" Failed tests = %0d", failed);
+        $display("==================================\n");
+        $fclose(file_Id);
+        $finish;
+    end
+
+endmodule
