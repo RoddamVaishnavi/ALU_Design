@@ -1,0 +1,233 @@
+module ALU_Design_ref
+#(
+    parameter WIDTH     = 8,
+    parameter CMD_WIDTH = 4
+)(
+    input  wire [WIDTH-1:0]     OPA,
+    input  wire [WIDTH-1:0]     OPB,
+    input  wire                 CIN,
+    input  wire                 CLK,
+    input  wire                 RST,
+    input  wire                 CE,
+    input  wire                 MODE,
+    input  wire [1:0]           INP_VALID,
+    input  wire [CMD_WIDTH-1:0] CMD,
+    output reg                  COUT,
+    output reg                  OVERFLOW,
+    output reg                  ERR,
+    output reg                  G,
+    output reg                  L,
+    output reg                  E,
+    output reg [WIDTH:0]        RESULT,
+    output reg [2*WIDTH:0]     MUL_RES
+
+);
+
+    localparam Add        = 4'b0000;
+    localparam Sub        = 4'b0001;
+    localparam Add_cin    = 4'b0010;
+    localparam Sub_cin    = 4'b0011;
+    localparam And        = 4'b0100;
+    localparam Or         = 4'b0101;
+    localparam Nor        = 4'b0110;
+    localparam Xor        = 4'b0111;
+    localparam Xnor       = 4'b1000;
+    localparam Cmp        = 4'b1001;
+    localparam Mul_Inc    = 4'b1010;
+    localparam Mul_shift  = 4'b1011;
+    localparam Add_signed = 4'b1100;
+    localparam Sub_signed = 4'b1101;
+    localparam ROL_A_B    = 4'b1110;
+    localparam ROR_A_B    = 4'b1111;
+
+    localparam Inc_A  = 4'b0000;
+    localparam Dec_A  = 4'b0001;
+    localparam Not_A  = 4'b0010;
+    localparam Shr1_A = 4'b0011;
+    localparam Shl1_A = 4'b0100;
+
+    localparam Inc_B  = 4'b0000;
+    localparam Dec_B  = 4'b0001;
+    localparam Not_B  = 4'b0010;
+    localparam Shr1_B = 4'b0011;
+    localparam Shl1_B = 4'b0100;
+
+    reg signed [WIDTH-1:0]     S_OPA;
+    reg signed [WIDTH-1:0]     S_OPB;
+    reg signed [WIDTH:0]       S_RESULT;
+
+    reg [WIDTH-1:0]            OPA_CLK1, OPB_CLK1;
+    reg [CMD_WIDTH-1:0]        CMD_CLK1;
+    reg [1:0]                  INP_VALID_CLK1;
+    reg                        CIN_CLK1, MODE_CLK1;
+
+    reg [WIDTH-1:0]            OPA_CLK2, OPB_CLK2;
+    reg [CMD_WIDTH-1:0]        CMD_CLK2;
+    reg [1:0]                  INP_VALID_CLK2;
+
+    reg [2:0]                  shift_raw;
+    reg [$clog2(WIDTH)-1:0]    shift_amount;
+
+    always @(posedge CLK) begin
+        if (RST) begin
+            OPA_CLK1        <= 0;
+            OPB_CLK1        <= 0;
+            CMD_CLK1        <= 0;
+            INP_VALID_CLK1  <= 0;
+            CIN_CLK1        <= 0;
+            MODE_CLK1       <= 0;
+        end else begin
+            OPA_CLK1        <= OPA;
+            OPB_CLK1        <= OPB;
+            CMD_CLK1        <= CMD;
+            INP_VALID_CLK1  <= INP_VALID;
+            CIN_CLK1        <= CIN;
+            MODE_CLK1       <= MODE;
+        end
+    end
+
+    always @(posedge CLK) begin
+        if (RST) begin
+            OPA_CLK2        <= 0;
+            OPB_CLK2        <= 0;
+            CMD_CLK2        <= 0;
+            INP_VALID_CLK2  <= 0;
+            ERR <= 0;
+        end else begin
+            CMD_CLK2        <= CMD_CLK1;
+            INP_VALID_CLK2  <= INP_VALID_CLK1;
+            ERR <= 0;
+            case (CMD_CLK1)
+                Mul_Inc: begin
+                    if (INP_VALID_CLK1 == 2'b11) begin
+                        OPA_CLK2 <= OPA_CLK1 + 1;
+                        OPB_CLK2 <= OPB_CLK1 + 1;
+                    end else begin
+                        OPA_CLK2 <= OPA_CLK1;
+                        OPB_CLK2 <= OPB_CLK1;
+                    end
+                end
+                Mul_shift: begin
+                    if (INP_VALID_CLK1 == 2'b11) begin
+                        OPA_CLK2 <= OPA_CLK1 << 1;
+                        OPB_CLK2 <= OPB_CLK1;
+                    end else begin
+                        OPA_CLK2 <= OPA_CLK1;
+                        OPB_CLK2 <= OPB_CLK1;
+                    end
+                end
+                default: begin
+                    OPA_CLK2 <= OPA_CLK1;
+                    OPB_CLK2 <= OPB_CLK1;
+                end
+            endcase
+        end
+    end
+
+    always @(posedge CLK) begin
+        if (RST) begin
+            RESULT       <= 0;
+            COUT         <= 0;
+            OVERFLOW     <= 0;
+            G            <= 0;
+            L            <= 0;
+            E            <= 0;
+            ERR          <= 0;
+            MUL_RES      <= 0;
+        end else if (!CE) begin
+            ERR <= 1;
+        end else begin
+            RESULT    <= 0;
+            COUT      <= 0;
+            OVERFLOW  <= 0;
+            G         <= 0;
+            L         <= 0;
+            E         <= 0;
+            ERR       <= 0;
+
+            if (INP_VALID_CLK1 == 2'b11) begin
+                if (MODE_CLK1) begin
+                    case (CMD_CLK1)
+                        Add: begin RESULT <= OPA_CLK1 + OPB_CLK1; COUT <= RESULT[WIDTH]; end
+                        Sub: begin RESULT <= OPA_CLK1 - OPB_CLK1; COUT <= (OPA_CLK1 < OPB_CLK1); end
+                        Add_cin: begin RESULT <= OPA_CLK1 + OPB_CLK1 + CIN_CLK1; COUT <= RESULT[WIDTH]; end
+                        Sub_cin: begin RESULT <= OPA_CLK1 - OPB_CLK1 - CIN_CLK1; COUT <= (OPA_CLK1 < (OPB_CLK1 + CIN_CLK1)); end
+                        Cmp: begin G <= (OPA_CLK1 > OPB_CLK1); L <= (OPA_CLK1 < OPB_CLK1); E <= (OPA_CLK1 == OPB_CLK1); end
+                        Mul_Inc: begin MUL_RES <= OPA_CLK2 * OPB_CLK2; end
+                        Mul_shift: begin MUL_RES <= OPA_CLK2 * OPB_CLK2; end
+                        Add_signed: begin
+                            S_RESULT  <= $signed(OPA_CLK1) + $signed(OPB_CLK1);
+                            RESULT    <= S_RESULT;
+                            OVERFLOW  <= (~OPA_CLK1[WIDTH-1] & ~OPB_CLK1[WIDTH-1] & S_RESULT[WIDTH]) |
+                                         ( OPA_CLK1[WIDTH-1] &  OPB_CLK1[WIDTH-1] & ~S_RESULT[WIDTH]);
+                        end
+                        Sub_signed: begin
+                            S_RESULT  <= $signed(OPA_CLK1) - $signed(OPB_CLK1);
+                            RESULT    <= S_RESULT;
+                            OVERFLOW  <= ( OPA_CLK1[WIDTH-1] & ~OPB_CLK1[WIDTH-1] & ~S_RESULT[WIDTH]) |
+                                         (~OPA_CLK1[WIDTH-1] &  OPB_CLK1[WIDTH-1] &  S_RESULT[WIDTH]);
+                        end
+                        default: ERR <= 1;
+                    endcase
+
+
+
+                end else begin
+                    case (CMD_CLK1)
+                        And:   RESULT <= OPA_CLK1 & OPB_CLK1;
+                        Or:    RESULT <= OPA_CLK1 | OPB_CLK1;
+                        Nor:   RESULT <= ~(OPA_CLK1 | OPB_CLK1);
+                        Xor:   RESULT <= OPA_CLK1 ^ OPB_CLK1;
+                        Xnor:  RESULT <= ~(OPA_CLK1 ^ OPB_CLK1);
+                        ROL_A_B: begin
+                            shift_raw    = OPB_CLK1[2:0];
+                            shift_amount = shift_raw % WIDTH;
+                            RESULT       <= (OPA_CLK1 << shift_amount) | (OPA_CLK1 >> (WIDTH - shift_amount));
+                            ERR          <= |OPB_CLK1[7:4];
+                        end
+                        ROR_A_B: begin
+                            shift_raw    = OPB_CLK1[2:0];
+                            shift_amount = shift_raw % WIDTH;
+                            RESULT       <= (OPA_CLK1 >> shift_amount) | (OPA_CLK1 << (WIDTH - shift_amount));
+                            ERR          <= |OPB_CLK1[7:4];
+                        end
+                        default: ERR <= 1;
+                    endcase
+                end
+            end else if (INP_VALID_CLK1 == 2'b01) begin
+                if (MODE_CLK1) begin
+                    case (CMD_CLK1)
+                        Inc_A: begin RESULT <= OPA_CLK1 + 1; COUT <= RESULT[WIDTH]; end
+                        Dec_A: begin RESULT <= OPA_CLK1 - 1; COUT <= (OPA_CLK1 == 0); end
+                        default: ERR <= 1;
+                    endcase
+                end else begin
+                    case (CMD_CLK1)
+                        Not_A:  RESULT <= ~OPA_CLK1;
+                        Shr1_A: RESULT <= OPA_CLK1 >> 1;
+                        Shl1_A: RESULT <= OPA_CLK1 << 1;
+                        default: ERR <= 1;
+                    endcase
+                end
+            end else if (INP_VALID_CLK1 == 2'b10) begin
+                if (MODE_CLK1) begin
+                    case (CMD_CLK1)
+                        Inc_B: begin RESULT <= OPB_CLK1 + 1; COUT <= RESULT[WIDTH]; end
+                        Dec_B: begin RESULT <= OPB_CLK1 - 1; COUT <= (OPB_CLK1 == 0); end
+                        default: ERR <= 1;
+                    endcase
+                end else begin
+                    case (CMD_CLK1)
+                        Not_B:  RESULT <= ~OPB_CLK1;
+                        Shr1_B: RESULT <= OPB_CLK1 >> 1;
+                        Shl1_B: RESULT <= OPB_CLK1 << 1;
+                        default: ERR <= 1;
+                    endcase
+                end
+            end else begin
+                ERR <= 1;
+            end
+        end
+    end
+
+endmodule
